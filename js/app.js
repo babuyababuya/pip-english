@@ -11,7 +11,7 @@ let speakToken = 0;
 let audioCtx = null;
 
 function fresh() {
-  return { v: 1, mute: false, profiles: [], activeId: null, stars: {}, learned: {}, streak: {}, daily: {} };
+  return { v: 1, mute: false, lang: "", profiles: [], activeId: null, stars: {}, learned: {}, streak: {}, daily: {}, path: {}, review: {} };
 }
 function blankUi() {
   return {
@@ -59,8 +59,31 @@ function shuffle(list) {
   return a;
 }
 function levelName(id) {
+  if (uiLang() === "en") return { starter: "Starter", kid: "Elementary", grow: "Upper" }[id] || "Starter";
   const hit = LEVELS.find((x) => x.id === id);
   return hit ? hit.name : "启蒙";
+}
+function uiLang() {
+  if (state.lang === "en" || state.lang === "zh") return state.lang;
+  const nav = (navigator.language || "en").toLowerCase();
+  return nav.startsWith("zh") ? "zh" : "en";
+}
+function lessonTitle(lesson) {
+  if (!lesson) return "";
+  if (uiLang() !== "en" || !globalThis.PIP_LOCALE) return lesson.title;
+  return PIP_LOCALE.titles[lesson.id] || lesson.title;
+}
+function localTip(lesson, index) {
+  const phrase = lesson.phrases[index];
+  if (uiLang() !== "en" || !globalThis.PIP_LOCALE) return phrase.tip;
+  const tips = PIP_LOCALE.tips[lesson.id];
+  return (tips && tips[index]) || phrase.tip;
+}
+function localWhy(lesson, stepIndex, choiceIndex, zh) {
+  if (uiLang() !== "en" || !globalThis.PIP_LOCALE) return fill(zh);
+  const rows = PIP_LOCALE.whys[lesson.id];
+  const line = rows && rows[stepIndex] && rows[stepIndex][choiceIndex];
+  return fill(line || zh);
 }
 function active() {
   return state.profiles.find((p) => p.id === state.activeId) || null;
@@ -181,7 +204,9 @@ function similar(target, heard) {
 function listenFor(target, done) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!window.isSecureContext || !SR) {
-    toast("跟读需要用「打开皮皮英语.bat」启动。听皮皮读，一样算练习。");
+    toast(uiLang() === "en"
+      ? "Speaking needs Chrome or Edge on this site. You can still listen to Pip."
+      : "跟读需要用「打开皮皮英语.bat」启动。听皮皮读，一样算练习。");
     return;
   }
   stopSpeak();
@@ -220,8 +245,9 @@ function listenFor(target, done) {
 function todayBucket(pid) {
   const today = dateStr();
   if (!state.daily[pid] || state.daily[pid].date !== today) {
-    state.daily[pid] = { date: today, hunt: false, scene: false, oops: false, celebrated: false };
+    state.daily[pid] = { date: today, hunt: false, scene: false, oops: false, lesson: false, celebrated: false };
   }
+  if (state.daily[pid].lesson === undefined) state.daily[pid].lesson = false;
   return state.daily[pid];
 }
 function touchStreak(pid) {
@@ -257,13 +283,14 @@ function maybeDailyBonus(pid) {
 }
 function streakLabel(pid) {
   const s = state.streak[pid];
-  if (!s || !s.count) return "今天开始，连续天数就记上";
+  const en = uiLang() === "en";
+  if (!s || !s.count) return en ? "Start today and the streak begins" : "今天开始，连续天数就记上";
   const today = dateStr();
   const y = new Date();
   y.setDate(y.getDate() - 1);
-  if (s.last === today) return "已连续 " + s.count + " 天";
-  if (s.last === dateStr(y)) return "昨天练过，今天再玩就是 " + (s.count + 1) + " 天";
-  return "今天开始，连续天数重新记";
+  if (s.last === today) return en ? "Streak: " + s.count + " days" : "已连续 " + s.count + " 天";
+  if (s.last === dateStr(y)) return en ? "You practiced yesterday. Today makes " + (s.count + 1) : "昨天练过，今天再玩就是 " + (s.count + 1) + " 天";
+  return en ? "Start today and the streak begins again" : "今天开始，连续天数重新记";
 }
 function learnedCount(pid) {
   return Object.keys(state.learned[pid] || {}).length;
@@ -285,6 +312,10 @@ function greet() {
   const p = active();
   const h = new Date().getHours();
   const name = p ? p.name : "";
+  if (uiLang() === "en") {
+    const hello = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+    return hello + ", " + name;
+  }
   const hello = h < 11 ? "早上好" : h < 14 ? "中午好" : h < 18 ? "下午好" : "晚上好";
   return hello + "，" + name;
 }
@@ -486,13 +517,142 @@ function finishOops() {
   render();
 }
 
+function lessonList(level) {
+  return (PIP_DATA.lessons || []).filter((lesson) => lesson.level === level);
+}
+function lessonCursor(pid, level) {
+  if (!state.path[pid]) state.path[pid] = {};
+  return state.path[pid][level] || 0;
+}
+function currentLesson() {
+  const person = active();
+  const list = lessonList(person.level);
+  const cursor = lessonCursor(person.id, person.level);
+  return { lesson: list[cursor % list.length], cursor, total: list.length };
+}
+function lessonHomeCard() {
+  const info = currentLesson();
+  if (!info.lesson) return "";
+  const daily = todayBucket(active().id);
+  const reviewN = (state.review[active().id] || []).length;
+  const done = !!daily.lesson;
+  const title = lessonTitle(info.lesson);
+  const en = uiLang() === "en";
+  return `<button class="lesson-card ${done ? "done" : ""}" data-act="start-lesson">
+    <div class="kicker">${done ? (en ? "Today's lesson is done" : "今天的一课完成了") : (en ? "Today's lesson · about 4 minutes" : "今日一课 · 大约 4 分钟")}</div>
+    <b>${info.lesson.emoji} ${esc(title)}</b>
+    <span>${done
+      ? (en ? "The next lesson is ready if you want to keep going." : "还可以接着学下一课。学过的句子会按顺序往后排。")
+      : (en ? "Listen to three sentences, practice them, say them, then use them." : "先听三句，再练会，再说出来，最后用在对话里。")}</span>
+    <div class="mini-steps">${en ? "Learn · Practice · Speak · Use" : "学 · 练 · 说 · 用"}${reviewN ? (en ? " · review " + reviewN : " · 先复习 " + reviewN + " 句") : ""}</div>
+  </button>`;
+}
+function cloneLesson(lesson) {
+  const copy = JSON.parse(JSON.stringify(lesson));
+  copy.drills.forEach((drill) => { drill.options = shuffle(drill.options); });
+  return copy;
+}
+function queueReview(pid, drill) {
+  if (!state.review[pid]) state.review[pid] = [];
+  const list = state.review[pid].filter((item) => item.en !== drill.en);
+  list.unshift({
+    en: drill.en,
+    zh: drill.zh,
+    prompt: drill.prompt,
+    answer: drill.answer,
+    options: drill.options.slice()
+  });
+  state.review[pid] = list.slice(0, 12);
+}
+function dropReview(pid, en) {
+  if (!state.review[pid]) return;
+  state.review[pid] = state.review[pid].filter((item) => item.en !== en);
+}
+function startLesson() {
+  const info = currentLesson();
+  const pid = active().id;
+  const review = (state.review[pid] || []).slice(0, 2).map((item) => {
+    const copy = JSON.parse(JSON.stringify(item));
+    copy.options = shuffle(copy.options);
+    return copy;
+  });
+  ui.session = {
+    type: "lesson",
+    token: rid(),
+    lesson: cloneLesson(info.lesson),
+    phase: review.length ? "review" : "learn",
+    index: 0,
+    review: review,
+    speakIndex: 0,
+    applyIndex: 0,
+    speakHit: false,
+    hold: false,
+    firstTry: true,
+    clean: true,
+    starsEarned: 0,
+    why: "",
+    heard: ""
+  };
+  ui.screen = "lesson";
+  ui.overlay = null;
+  ui.mood = "idle";
+  render();
+  const line = ui.session.phase === "review" ? ui.session.review[0].en : ui.session.lesson.phrases[0].en;
+  speak(fill(line));
+}
+function stepBar(phase) {
+  const steps = uiLang() === "en"
+    ? [["learn", "Learn"], ["drill", "Try"], ["speak", "Say"], ["apply", "Use"]]
+    : [["learn", "学"], ["drill", "练"], ["speak", "说"], ["apply", "用"]];
+  const rank = { review: 0, learn: 0, drill: 1, speak: 2, apply: 3 };
+  const at = rank[phase] || 0;
+  return `<div class="stepbar">${steps.map((pair, i) => `<span class="${i < at ? "done" : i === at ? "now" : ""}">${pair[1]}</span>`).join("")}</div>`;
+}
+function currentBlank(session) {
+  return session.phase === "review" ? session.review[session.index] : session.lesson.drills[session.index];
+}
+function finishLesson() {
+  const session = ui.session;
+  const pid = active().id;
+  const level = active().level;
+  if (!state.path[pid]) state.path[pid] = {};
+  state.path[pid][level] = (state.path[pid][level] || 0) + 1;
+  const stars = session.starsEarned + (session.clean ? 2 : 0);
+  giveStars(pid, stars);
+  session.lesson.phrases.forEach((phrase) => remember(pid, fill(phrase.en)));
+  touchStreak(pid);
+  const bucket = todayBucket(pid);
+  const firstToday = !bucket.lesson;
+  bucket.lesson = true;
+  save();
+  ui.result = {
+    mode: "lesson",
+    title: lessonTitle(session.lesson),
+    stars: stars,
+    lines: session.lesson.phrases.map((phrase) => fill(phrase.en)),
+    note: firstToday
+      ? (uiLang() === "en" ? "Today's lesson is done. The next one is ready." : "今天的一课完成了。下一课已经排好，想继续就接着学。")
+      : (uiLang() === "en" ? "Another lesson done." : "又多学了一课。")
+  };
+  ui.session = null;
+  ui.screen = "result";
+  ui.mood = "happy";
+  burst();
+  beep("ok");
+  render();
+}
+
 function render() {
-  const playing = ui.session && (ui.screen === "hunt" || ui.screen === "scene" || ui.screen === "oops");
-  if (!playing && (ui.screen === "hunt" || ui.screen === "scene" || ui.screen === "oops")) ui.screen = "home";
+  const playScreens = ["hunt", "scene", "oops", "lesson"];
+  const playing = ui.session && playScreens.indexOf(ui.screen) >= 0;
+  if (!playing && playScreens.indexOf(ui.screen) >= 0) ui.screen = "home";
   const bare = ui.screen === "onboard";
   const app = document.getElementById("app");
   app.className = bare ? "bare" : "";
   const body = (screens[ui.screen] || screens.home)();
+  const lang = uiLang();
+  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  document.title = lang === "zh" ? "皮皮英语" : "Pip English";
   app.innerHTML = bare ? body : layout(body);
   const chat = document.querySelector(".chat");
   if (chat) chat.scrollTop = chat.scrollHeight;
@@ -504,23 +664,25 @@ function layout(body) {
   const navOn = ui.screen === "hunt" || ui.screen === "hunt-setup" ? "hunt"
     : ui.screen === "scene" || ui.screen === "scenes" ? "scenes"
     : ui.screen === "oops" ? "oops" : "home";
+  const en = uiLang() === "en";
   return `
     <header class="top">
       <button class="brand" data-act="nav" data-to="home">${parrot(ui.mood, true)}
-        <span class="brand-name">皮皮英语<small>${p ? esc(p.name) + " · " + levelName(p.level) : "学习伴侣"}</small></span>
+        <span class="brand-name">${en ? "Pip" : "皮皮英语"}<small>${p ? esc(p.name) + " · " + levelName(p.level) : (en ? "English buddy" : "学习伴侣")}</small></span>
       </button>
       <div class="top-actions">
-        <button class="icon-btn" data-act="mute" aria-label="声音">${state.mute ? "🔇" : "🔊"}</button>
-        <button class="icon-btn" data-act="nav" data-to="about" aria-label="说明">?</button>
+        <button class="icon-btn" data-act="lang" aria-label="${en ? "Language" : "语言"}">${en ? "中" : "EN"}</button>
+        <button class="icon-btn" data-act="mute" aria-label="${en ? "Sound" : "声音"}">${state.mute ? "🔇" : "🔊"}</button>
+        <button class="icon-btn" data-act="nav" data-to="about" aria-label="${en ? "About" : "说明"}">?</button>
         <div class="star-pill">★ ${stars}</div>
       </div>
     </header>
     <main class="main">${body}</main>
     <nav class="nav">
-      ${navBtn("home", "首页", "🏠", navOn)}
-      ${navBtn("hunt", "寻宝", "💎", navOn)}
-      ${navBtn("scenes", "剧场", "🎭", navOn)}
-      ${navBtn("oops", "纠错", "🔍", navOn)}
+      ${navBtn("home", en ? "Home" : "首页", "🏠", navOn)}
+      ${navBtn("hunt", en ? "Words" : "寻宝", "💎", navOn)}
+      ${navBtn("scenes", en ? "Scenes" : "剧场", "🎭", navOn)}
+      ${navBtn("oops", en ? "Fix" : "纠错", "🔍", navOn)}
     </nav>
     ${ui.overlay === "leave" ? leaveSheet() : ""}
   `;
@@ -529,12 +691,13 @@ function navBtn(id, label, icon, on) {
   return `<button data-act="nav" data-to="${id}" class="${on === id ? "on" : ""}"><small>${icon}</small>${label}</button>`;
 }
 function leaveSheet() {
+  const en = uiLang() === "en";
   return `<div class="overlay"><div class="sheet">
-    <h2>先离开吗？</h2>
-    <p>这一局还没结束，星星先不记。可以留下来把这一小局玩完。</p>
+    <h2>${en ? "Leave this round?" : "先离开吗？"}</h2>
+    <p>${en ? "This round is not finished, so these stars are not saved yet." : "这一局还没结束，星星先不记。可以留下来把这一小局玩完。"}</p>
     <div class="actions">
-      <button class="ghost" data-act="leave-go">离开</button>
-      <button class="primary" data-act="leave-stay">继续玩</button>
+      <button class="ghost" data-act="leave-go">${en ? "Leave" : "离开"}</button>
+      <button class="primary" data-act="leave-stay">${en ? "Keep going" : "继续玩"}</button>
     </div>
   </div></div>`;
 }
@@ -542,28 +705,31 @@ function leaveSheet() {
 const screens = {
   onboard() {
     const d = ui.draft;
+    const en = uiLang() === "en";
     if (ui.step === "who") {
       return `<section class="onboard">
         ${parrot("happy")}
-        <p class="kicker">英语学习伴侣 · 0.1</p>
-        <h1 class="greet">${ui.adding ? "再加一位家人" : "嗨，我是皮皮"}</h1>
-        <p class="sub">我们用很短的小游戏学英语。说错了没关系，我会停下来，用中文告诉你为什么。</p>
+        <p class="kicker">${en ? "English buddy · 0.2" : "英语学习伴侣 · 0.2"}</p>
+        <h1 class="greet">${ui.adding ? (en ? "Add someone" : "再加一位家人") : (en ? "Hi, I'm Pip" : "嗨，我是皮皮")}</h1>
+        <p class="sub">${en
+          ? "One lesson a day: listen to three sentences, practice them, say them, then use them in a short chat."
+          : "每天一课：先听三句，再练会，再说出来，最后用在对话里。说错了，我会用中文告诉你为什么。"}</p>
         <div style="height:12px"></div>
-        <button class="pick" data-act="draft-who" data-role="kid" data-level="starter"><b>小朋友 · 启蒙</b><span>认动物、颜色、打招呼</span></button>
-        <button class="pick" data-act="draft-who" data-role="kid" data-level="kid"><b>小朋友 · 小学</b><span>学校、天气、午饭、借东西</span></button>
-        <button class="pick" data-act="draft-who" data-role="adult" data-level="grow"><b>我自己来 · 进阶</b><span>道歉、建议、问路和语法</span></button>
-        ${ui.adding ? `<button class="ghost full" data-act="cancel-add">先不加了</button>` : ""}
+        <button class="pick" data-act="draft-who" data-role="kid" data-level="starter"><b>${en ? "Child · Starter" : "小朋友 · 启蒙"}</b><span>${en ? "Animals, colors, hello" : "认动物、颜色、打招呼"}</span></button>
+        <button class="pick" data-act="draft-who" data-role="kid" data-level="kid"><b>${en ? "Child · Elementary" : "小朋友 · 小学"}</b><span>${en ? "School, lunch, asking for help" : "学校、天气、午饭、借东西"}</span></button>
+        <button class="pick" data-act="draft-who" data-role="adult" data-level="grow"><b>${en ? "Me · Upper" : "我自己来 · 进阶"}</b><span>${en ? "Sorry, advice, asking the way" : "道歉、建议、问路和语法"}</span></button>
+        ${ui.adding ? `<button class="ghost full" data-act="cancel-add">${en ? "Not now" : "先不加了"}</button>` : ""}
       </section>`;
     }
     return `<section class="onboard">
       ${parrot("think")}
       <p class="kicker">${levelName(d.level)}</p>
-      <h1 class="greet">怎么称呼你？</h1>
-      <p class="sub">孩子可以用小名，家长也可以用“爸爸”“妈妈”。</p>
-      <input id="name-input" class="name-input" maxlength="8" placeholder="例如：豆豆" value="${esc(d.name)}" />
-      <button class="primary full" data-act="save-profile">开始一起玩</button>
+      <h1 class="greet">${en ? "What should Pip call you?" : "怎么称呼你？"}</h1>
+      <p class="sub">${en ? "A first name is enough. Up to 8 characters." : "孩子可以用小名，家长也可以用“爸爸”“妈妈”。"}</p>
+      <input id="name-input" class="name-input" maxlength="8" placeholder="${en ? "For example: Mia" : "例如：豆豆"}" value="${esc(d.name)}" />
+      <button class="primary full" data-act="save-profile">${en ? "Start" : "开始一起玩"}</button>
       <div style="height:8px"></div>
-      <button class="ghost full" data-act="draft-back">返回</button>
+      <button class="ghost full" data-act="draft-back">${en ? "Back" : "返回"}</button>
     </section>`;
   },
   home() {
@@ -572,43 +738,48 @@ const screens = {
     const daily = todayBucket(p.id);
     const learned = state.learned[p.id] || {};
     const words = Object.keys(learned).sort((a, b) => learned[b] - learned[a]).slice(0, 8);
+    const en = uiLang() === "en";
+    const standalone = window.matchMedia("(display-mode: standalone)").matches;
     return `
       <section class="hero">
         ${parrot(ui.mood)}
         <div>
-          <p class="kicker">今天玩一小会儿</p>
+          <p class="kicker">${en ? "A few minutes today" : "今天玩一小会儿"}</p>
           <h1 class="greet">${esc(greet())}</h1>
-          <p class="sub">${esc(streakLabel(p.id))} · 认识了 ${learnedCount(p.id)} 个词</p>
+          <p class="sub">${esc(streakLabel(p.id))} · ${en ? learnedCount(p.id) + " words" : "认识了 " + learnedCount(p.id) + " 个词"}</p>
         </div>
       </section>
+      ${lessonHomeCard()}
+      ${!standalone ? `<p class="hint">${en ? "On a phone: open the browser menu and choose Add to Home Screen. Pip then opens like an app." : "手机浏览器菜单里选「添加到主屏幕」，就能像 App 一样打开。"}</p>` : ""}
       <div class="quote">
         <div class="quote-en">${esc(q.en)}</div>
-        <div class="quote-zh">${esc(q.zh)}</div>
+        ${en ? "" : `<div class="quote-zh">${esc(q.zh)}</div>`}
         <div class="actions">
-          <button class="sun" data-act="say" data-text="${esc(q.en)}">听皮皮读</button>
-          <button class="ghost" data-act="say-zh" data-text="${esc(q.zh)}">听中文</button>
+          <button class="sun" data-act="say" data-text="${esc(q.en)}">${en ? "Listen" : "听皮皮读"}</button>
+          ${en ? "" : `<button class="ghost" data-act="say-zh" data-text="${esc(q.zh)}">听中文</button>`}
         </div>
       </div>
       <div class="goals">
-        <div class="goal ${daily.hunt ? "done" : ""}">寻宝<span>${daily.hunt ? "完成" : "一轮 6 题"}</span></div>
-        <div class="goal ${daily.scene ? "done" : ""}">剧场<span>${daily.scene ? "完成" : "一段对话"}</span></div>
-        <div class="goal ${daily.oops ? "done" : ""}">纠错<span>${daily.oops ? "完成" : "四道小题"}</span></div>
+        <div class="goal ${daily.hunt ? "done" : ""}">${en ? "Words" : "寻宝"}<span>${daily.hunt ? (en ? "Done" : "完成") : (en ? "6 cards" : "一轮 6 题")}</span></div>
+        <div class="goal ${daily.scene ? "done" : ""}">${en ? "Scenes" : "剧场"}<span>${daily.scene ? (en ? "Done" : "完成") : (en ? "One chat" : "一段对话")}</span></div>
+        <div class="goal ${daily.oops ? "done" : ""}">${en ? "Fix" : "纠错"}<span>${daily.oops ? (en ? "Done" : "完成") : (en ? "4 items" : "四道小题")}</span></div>
       </div>
       <div class="level-switch">
-        ${LEVELS.map((lv) => `<button data-act="set-level" data-level="${lv.id}" class="${p.level === lv.id ? "on" : ""}">${lv.name}</button>`).join("")}
+        ${LEVELS.map((lv) => `<button data-act="set-level" data-level="${lv.id}" class="${p.level === lv.id ? "on" : ""}">${levelName(lv.id)}</button>`).join("")}
       </div>
-      <button class="play-card" data-act="nav" data-to="hunt"><span class="emoji-badge">💎</span><span><b>单词寻宝</b><span>看图选词，听音选意思。可以和家人轮流。</span></span><span class="chev">›</span></button>
-      <button class="play-card" data-act="nav" data-to="scenes"><span class="emoji-badge">🎭</span><span><b>情景剧场</b><span>短对话。选对之后，可以跟着读出来。</span></span><span class="chev">›</span></button>
-      <button class="play-card" data-act="nav" data-to="oops"><span class="emoji-badge">🔍</span><span><b>找错小课堂</b><span>点出奇怪的词，皮皮用中文讲原因。</span></span><span class="chev">›</span></button>
-      <div class="row-title"><h2>谁在学</h2><p>${state.profiles.length < 4 ? "最多 4 位" : ""}</p></div>
+      <div class="row-title"><h2>${en ? "More practice" : "想多玩一会儿"}</h2><p>${en ? "Beside today's lesson" : "今日一课之外"}</p></div>
+      <button class="play-card" data-act="nav" data-to="hunt"><span class="emoji-badge">💎</span><span><b>${en ? "Word hunt" : "单词寻宝"}</b><span>${en ? "Picture to word. Extra practice. Some hints are still in Chinese." : "看图选词，听音选意思。可以和家人轮流。"}</span></span><span class="chev">›</span></button>
+      <button class="play-card" data-act="nav" data-to="scenes"><span class="emoji-badge">🎭</span><span><b>${en ? "Scene theater" : "情景剧场"}</b><span>${en ? "Short chats. After a correct line, you can say it." : "短对话。选对之后，可以跟着读出来。"}</span></span><span class="chev">›</span></button>
+      <button class="play-card" data-act="nav" data-to="oops"><span class="emoji-badge">🔍</span><span><b>${en ? "Spot the mistake" : "找错小课堂"}</b><span>${en ? "Find the odd word. Explanations are in Chinese." : "点出奇怪的词，皮皮用中文讲原因。"}</span></span><span class="chev">›</span></button>
+      <div class="row-title"><h2>${en ? "Who is learning" : "谁在学"}</h2><p>${state.profiles.length < 4 ? (en ? "Up to 4" : "最多 4 位") : ""}</p></div>
       <div class="chips">
         ${state.profiles.map((one) => `<button class="chip ${one.id === p.id ? "on" : ""}" data-act="switch" data-id="${one.id}">${esc(one.name)}</button>`).join("")}
-        ${state.profiles.length < 4 ? `<button class="chip" data-act="add-profile">＋ 家人</button>` : ""}
+        ${state.profiles.length < 4 ? `<button class="chip" data-act="add-profile">${en ? "+ Person" : "＋ 家人"}</button>` : ""}
       </div>
-      ${words.length ? `<div class="row-title"><h2>单词本</h2><p>点一下就能听</p></div><div class="pills">${words.map((en) => {
-        const w = findWord(en);
-        return `<button class="pill" data-act="say" data-text="${esc(en)}">${w.emoji} ${esc(en)}</button>`;
-      }).join("")}</div>` : `<p class="hint" style="margin-top:14px">单词本还是空的。去寻宝，认识第一个词。</p>`}
+      ${words.length ? `<div class="row-title"><h2>${en ? "Word book" : "单词本"}</h2><p>${en ? "Tap to hear" : "点一下就能听"}</p></div><div class="pills">${words.map((word) => {
+        const w = findWord(word);
+        return `<button class="pill" data-act="say" data-text="${esc(word)}">${w.emoji} ${esc(word)}</button>`;
+      }).join("")}</div>` : `<p class="hint" style="margin-top:14px">${en ? "The word book is empty. Try word hunt for the first word." : "单词本还是空的。去寻宝，认识第一个词。"}</p>`}
     `;
   },
   "hunt-setup"() {
@@ -692,6 +863,60 @@ const screens = {
       ${foot}
     </section>`;
   },
+  lesson() {
+    const s = ui.session;
+    const lesson = s.lesson;
+    const en = uiLang() === "en";
+    let body = "";
+    if (s.phase === "learn") {
+      const phrase = lesson.phrases[s.index];
+      body = `<div class="prompt">
+        <p class="hint">${en ? "Listen first" : "先听熟"} ${s.index + 1}/3</p>
+        <div class="reveal-en">${efill(phrase.en)}</div>
+        ${en ? "" : `<div class="reveal-zh">${efill(phrase.zh)}</div>`}
+        <div class="reveal-hint">${esc(localTip(lesson, s.index))}</div>
+        <div class="actions"><button class="sun" data-act="lesson-hear">${en ? "Listen" : "听一遍"}</button></div>
+      </div>
+      <button class="primary full" data-act="lesson-next">${s.index === lesson.phrases.length - 1 ? (en ? "Practice" : "去练一练") : (en ? "Next" : "下一句")}</button>`;
+    } else if (s.phase === "review" || s.phase === "drill") {
+      const item = currentBlank(s);
+      const total = s.phase === "review" ? s.review.length : lesson.drills.length;
+      body = `<div class="prompt">
+        <p class="hint">${s.phase === "review" ? (en ? "This one was not smooth last time" : "这句上次还没顺") : (en ? "Complete the sentence" : "把句子补完整")} ${s.index + 1}/${total}</p>
+        <h2>${efill(item.prompt)}</h2>
+        ${en ? "" : `<p class="hint">${esc(item.zh || "")}</p>`}
+      </div>
+      <div class="options">${item.options.map((option, i) => `<button class="opt" data-act="lesson-pick" data-i="${i}">${esc(option)}</button>`).join("")}</div>
+      ${s.why ? `<div class="why">${esc(s.why)}</div>` : ""}`;
+    } else if (s.phase === "speak") {
+      const phrase = lesson.phrases[s.speakIndex];
+      body = `<div class="prompt">
+        <p class="hint">${en ? "Say the whole sentence" : "整句跟着说"} ${s.speakIndex + 1}/3. ${en ? "Pip checks the whole sentence, not each sound." : "皮皮只听整句像不像。"}</p>
+        <div class="reveal-en">${efill(phrase.en)}</div>
+        ${en ? "" : `<div class="reveal-zh">${efill(phrase.zh)}</div>`}
+        ${s.heard ? `<p class="hint">${en ? "Pip heard: " : "皮皮听成了："}${esc(s.heard)}</p>` : ""}
+        ${s.speakHit ? `<div class="why">${en ? "That sounded like the sentence." : "整句听起来很像。"}</div>` : ""}
+        <div class="actions">
+          <button class="sun" data-act="lesson-hear">${en ? "Listen" : "听一遍"}</button>
+          <button class="primary" data-act="lesson-speak">${ui.listening ? (en ? "Listening…" : "在听…") : (en ? "Say it" : "我来跟读")}</button>
+        </div>
+      </div>
+      <button class="ghost full" data-act="lesson-skip">${s.speakHit ? (s.speakIndex === lesson.phrases.length - 1 ? (en ? "Use it" : "去用一用") : (en ? "Next" : "下一句")) : (en ? "Skip this one" : "这句先跳过")}</button>`;
+    } else {
+      const step = lesson.apply[s.applyIndex];
+      const right = step.choices.filter((choice) => choice.ok)[0];
+      body = `<div class="bubble pip"><div class="en">${efill(step.pip.en)}</div>${en ? "" : `<div class="zh">${efill(step.pip.zh)}</div>`}</div>
+        ${s.hold
+          ? `<div class="bubble me"><div class="en">${efill(right.en)}</div></div><div class="why">${esc(s.why)}</div><button class="primary full" data-act="lesson-apply-next">${s.applyIndex === lesson.apply.length - 1 ? (en ? "Finish" : "完成本课") : (en ? "Continue" : "继续")}</button>`
+          : `<div class="choices">${step.choices.map((choice, i) => `<button class="choice" data-act="lesson-apply" data-i="${i}"><b>${efill(choice.en)}</b>${en ? "" : `<small>${efill(choice.zh)}</small>`}</button>`).join("")}</div>${s.why ? `<div class="why">${esc(s.why)}</div>` : ""}`}`;
+    }
+    return `<section class="stage">
+      <div class="play-top"><button class="ghost" data-act="nav" data-to="home">${en ? "Exit" : "退出"}</button><b>${lesson.emoji} ${esc(lessonTitle(lesson))}</b></div>
+      ${stepBar(s.phase)}
+      ${s.phase === "review" ? `<div class="turn">${en ? "Review one line, then the new lesson" : "先复习一句，再学新的"}</div>` : ""}
+      ${body}
+    </section>`;
+  },
   oops() {
     const s = ui.session;
     const item = s.items[s.index];
@@ -730,26 +955,43 @@ const screens = {
     }
     return `<section class="result-card">
       ${parrot("happy")}
-      <p class="kicker">皮皮记住了</p>
+      <p class="kicker">${uiLang() === "en" ? "Pip kept this" : "皮皮记住了"}</p>
       <h2>${esc(r.title)}</h2>
-      ${r.bonus ? `<p>今日三件事齐了，额外 +5 星。</p>` : ""}
+      ${r.note ? `<p>${esc(r.note)}</p>` : ""}
+      ${r.bonus ? `<p>${uiLang() === "en" ? "All three extra practices are done. +5 stars." : "今日三件事齐了，额外 +5 星。"}</p>` : ""}
       ${extra}
       <div class="actions">
-        <button class="ghost" data-act="nav" data-to="home">回首页</button>
-        <button class="primary" data-act="again">再来一局</button>
+        <button class="ghost" data-act="nav" data-to="home">${uiLang() === "en" ? "Home" : "回首页"}</button>
+        <button class="primary" data-act="again">${r.mode === "lesson" ? (uiLang() === "en" ? "Next lesson" : "下一课") : (uiLang() === "en" ? "Play again" : "再来一局")}</button>
       </div>
     </section>`;
   },
   about() {
+    const en = uiLang() === "en";
+    if (en) {
+      return `<section class="panel about">
+        <h2>Pip English 0.2</h2>
+        <p>A short daily English lesson. Progress stays in this browser and is not uploaded.</p>
+        <h3>Today's lesson</h3>
+        <p>Learn, practice, speak, use. Listen to three everyday sentences, fill the blanks, say the whole sentence, then use it in a tiny chat. Speaking checks the whole sentence. It does not score individual sounds.</p>
+        <h3>Install</h3>
+        <p>In Chrome, Edge, or Safari, use the browser menu and choose Add to Home Screen or Install. Pip then opens like an app.</p>
+        <h3>More practice</h3>
+        <p>Word hunt, scenes, and mistake practice are still here. Some explanations in those games are in Chinese. The daily lesson is in English when this page is in English.</p>
+        <h3>Clear</h3>
+        <p>This deletes the people and stars saved in this browser.</p>
+        <button class="ghost full" data-act="reset">${ui.resetArmed ? "Tap again to confirm" : "Clear progress on this device"}</button>
+      </section>`;
+    }
     return `<section class="panel about">
-      <h2>皮皮英语 0.1</h2>
+      <h2>皮皮英语 0.2</h2>
       <p>给自己和孩子的英语小伙伴。进度只存在这台浏览器里，不上传。</p>
-      <h3>现在能玩</h3>
-      <p>单词寻宝、情景剧场、找错小课堂。剧场可以跟读。寻宝可以两人轮流。说错会看到中文原因。</p>
-      <h3>怎么听、怎么说</h3>
-      <p>用 Chrome 或 Edge。双击旁边的「打开皮皮英语.bat」，跟读才能听见你。直接双击 index.html 也可以做题、听皮皮读。</p>
-      <h3>下一版</h3>
-      <p>接上大模型之后，皮皮可以随时接话，变成 24 小时陪练。这一版先把开口、纠错和亲子轮流做顺。</p>
+      <h3>今日一课</h3>
+      <p>学、练、说、用。先听生活里会说的三句，补全句子，再整句跟读，最后放进一段小对话。跟读只判断整句像不像，不假装做音标打分。</p>
+      <h3>安装</h3>
+      <p>用 Chrome 或 Edge 打开这个网页，在浏览器菜单里选「添加到主屏幕」或「安装」。跟读需要 https 或本机启动。</p>
+      <h3>自由练习</h3>
+      <p>单词寻宝、情景剧场、找错小课堂还在。剧场可以跟读。寻宝可以两人轮流。说错会看到中文原因。</p>
       <h3>清空</h3>
       <p>会删掉这台浏览器里的家人和星星。</p>
       <button class="ghost full" data-act="reset">${ui.resetArmed ? "再点一次，确认清空" : "清空本机进度"}</button>
@@ -777,7 +1019,7 @@ const actions = {
   "save-profile"() {
     const input = document.getElementById("name-input");
     const name = (input ? input.value : ui.draft.name).trim().slice(0, 8);
-    if (!name) { toast("先起一个称呼"); return; }
+    if (!name) { toast(uiLang() === "en" ? "Pick a name first" : "先起一个称呼"); return; }
     const profile = { id: rid(), name, role: ui.draft.role, level: ui.draft.level };
     state.profiles.push(profile);
     state.activeId = profile.id;
@@ -787,13 +1029,18 @@ const actions = {
     ui.step = "who";
     ui.screen = "home";
     ui.mood = "happy";
-    toast("你好，" + name + "。今天我们玩一小会儿。");
+    toast(uiLang() === "en" ? "Hi, " + name + ". Let's do a short lesson." : "你好，" + name + "。今天我们玩一小会儿。");
     render();
   },
   nav(el) { navTo(el.dataset.to); },
   mute() {
     state.mute = !state.mute;
     if (state.mute) stopSpeak();
+    save();
+    render();
+  },
+  lang() {
+    state.lang = uiLang() === "en" ? "zh" : "en";
     save();
     render();
   },
@@ -1029,11 +1276,174 @@ const actions = {
     ui.mood = "think";
     render();
   },
+  "start-lesson"() { startLesson(); },
+  "lesson-hear"() {
+    const s = ui.session;
+    let line = "";
+    if (s.phase === "learn") line = s.lesson.phrases[s.index].en;
+    else if (s.phase === "speak") line = s.lesson.phrases[s.speakIndex].en;
+    else if (s.phase === "review") line = s.review[s.index].en;
+    else if (s.phase === "apply") line = s.lesson.apply[s.applyIndex].pip.en;
+    if (line) speak(fill(line));
+  },
+  "lesson-next"() {
+    const s = ui.session;
+    if (!s || s.phase !== "learn") return;
+    if (s.index < s.lesson.phrases.length - 1) {
+      s.index += 1;
+      render();
+      speak(fill(s.lesson.phrases[s.index].en));
+      return;
+    }
+    s.phase = "drill";
+    s.index = 0;
+    s.firstTry = true;
+    s.why = "";
+    ui.mood = "think";
+    render();
+  },
+  "lesson-pick"(el) {
+    const s = ui.session;
+    if (!s || (s.phase !== "drill" && s.phase !== "review")) return;
+    const item = currentBlank(s);
+    const picked = item.options[Number(el.dataset.i)];
+    if (picked !== item.answer) {
+      s.firstTry = false;
+      s.clean = false;
+      s.why = uiLang() === "en" ? "Use " + item.answer + ". Try again." : "这里用 " + item.answer + "。再选一次。";
+      if (s.phase === "drill") queueReview(active().id, s.lesson.drills[s.index]);
+      ui.mood = "oops";
+      beep("bad");
+      render();
+      return;
+    }
+    if (s.firstTry) s.starsEarned += 1;
+    dropReview(active().id, item.en);
+    beep("ok");
+    const total = s.phase === "review" ? s.review.length : s.lesson.drills.length;
+    if (s.index < total - 1) {
+      s.index += 1;
+      s.firstTry = true;
+      s.why = "";
+      render();
+      return;
+    }
+    if (s.phase === "review") {
+      s.phase = "learn";
+      s.index = 0;
+      s.firstTry = true;
+      s.why = "";
+      ui.mood = "idle";
+      render();
+      speak(fill(s.lesson.phrases[0].en));
+      return;
+    }
+    s.phase = "speak";
+    s.speakIndex = 0;
+    s.speakHit = false;
+    s.heard = "";
+    s.why = "";
+    render();
+    speak(fill(s.lesson.phrases[0].en));
+  },
+  "lesson-speak"() {
+    const s = ui.session;
+    if (!s || s.phase !== "speak") return;
+    const line = fill(s.lesson.phrases[s.speakIndex].en);
+    listenFor(line, (heard) => {
+      const cur = ui.session;
+      if (!cur || cur.type !== "lesson" || cur.phase !== "speak") return;
+      if (heard && similar(line, heard)) {
+        cur.heard = "";
+        if (!cur.speakHit) {
+          cur.speakHit = true;
+          cur.starsEarned += 1;
+          toast(uiLang() === "en" ? "That sounded like the sentence" : "整句听起来很像");
+          beep("ok");
+          burst();
+        }
+        ui.mood = "happy";
+      } else if (!heard) {
+        toast(uiLang() === "en" ? "Didn't catch that. Listen again, or skip for now." : "没有听清。可以再听一遍，或先跳过。");
+        ui.mood = "oops";
+      } else {
+        cur.heard = heard;
+        toast(uiLang() === "en" ? "Not quite. Listen to Pip once more." : "还不太像。再听皮皮读一遍。");
+        ui.mood = "oops";
+      }
+      render();
+    });
+  },
+  "lesson-skip"() {
+    const s = ui.session;
+    if (!s || s.phase !== "speak") return;
+    const phrase = s.lesson.phrases[s.speakIndex];
+    const drill = s.lesson.drills[s.speakIndex];
+    if (!s.speakHit) {
+      s.clean = false;
+      queueReview(active().id, drill);
+    } else {
+      dropReview(active().id, phrase.en);
+    }
+    if (s.speakIndex < s.lesson.phrases.length - 1) {
+      s.speakIndex += 1;
+      s.speakHit = false;
+      s.heard = "";
+      render();
+      speak(fill(s.lesson.phrases[s.speakIndex].en));
+      return;
+    }
+    s.phase = "apply";
+    s.applyIndex = 0;
+    s.firstTry = true;
+    s.hold = false;
+    s.why = "";
+    render();
+    speak(fill(s.lesson.apply[0].pip.en));
+  },
+  "lesson-apply"(el) {
+    const s = ui.session;
+    if (!s || s.phase !== "apply" || s.hold) return;
+    const step = s.lesson.apply[s.applyIndex];
+    const choice = step.choices[Number(el.dataset.i)];
+    if (!choice.ok) {
+      s.firstTry = false;
+      s.clean = false;
+      s.why = localWhy(s.lesson, s.applyIndex, Number(el.dataset.i), choice.why);
+      ui.mood = "oops";
+      beep("bad");
+      render();
+      return;
+    }
+    if (s.firstTry) s.starsEarned += 1;
+    s.why = localWhy(s.lesson, s.applyIndex, Number(el.dataset.i), choice.why);
+    s.hold = true;
+    ui.mood = "happy";
+    beep("ok");
+    burst();
+    render();
+    speak(fill(choice.en));
+  },
+  "lesson-apply-next"() {
+    const s = ui.session;
+    if (!s || !s.hold) return;
+    if (s.applyIndex >= s.lesson.apply.length - 1) {
+      finishLesson();
+      return;
+    }
+    s.applyIndex += 1;
+    s.firstTry = true;
+    s.hold = false;
+    s.why = "";
+    render();
+    speak(fill(s.lesson.apply[s.applyIndex].pip.en));
+  },
   say(el) { speak(el.dataset.text, "en-US"); },
   "say-zh"(el) { speak(el.dataset.text, "zh-CN"); },
   again() {
     const mode = ui.result && ui.result.mode;
-    if (mode === "hunt") navTo("hunt");
+    if (mode === "lesson") startLesson();
+    else if (mode === "hunt") navTo("hunt");
     else if (mode === "scene" && ui.result.sceneId) startScene(ui.result.sceneId);
     else startOops();
   },
@@ -1069,7 +1479,7 @@ const actions = {
 };
 
 function navTo(to) {
-  const playing = ui.session && (ui.screen === "hunt" || ui.screen === "scene" || ui.screen === "oops");
+  const playing = ui.session && (ui.screen === "hunt" || ui.screen === "scene" || ui.screen === "oops" || ui.screen === "lesson");
   if (playing) {
     ui.leaveTo = to;
     ui.overlay = "leave";
@@ -1103,7 +1513,7 @@ function onClick(e) {
   if (!el) return;
   const fn = actions[el.dataset.act];
   if (!fn) return;
-  if (el.dataset.act !== "scene-follow") stopListen();
+  if (el.dataset.act !== "scene-follow" && el.dataset.act !== "lesson-speak") stopListen();
   fn(el, e);
 }
 function onKey(e) {
@@ -1118,11 +1528,21 @@ function onKey(e) {
     const btn = document.querySelector('.choice[data-i="' + (n - 1) + '"]');
     if (btn) actions["scene-pick"](btn);
   }
+  if (ui.screen === "lesson" && ui.session && (ui.session.phase === "drill" || ui.session.phase === "review") && n >= 1 && n <= 3) {
+    const btn = document.querySelector('.opt[data-i="' + (n - 1) + '"]');
+    if (btn) actions["lesson-pick"](btn);
+  }
+  if (ui.screen === "lesson" && ui.session && ui.session.phase === "apply" && !ui.session.hold && n >= 1 && n <= 3) {
+    const btn = document.querySelector('.choice[data-i="' + (n - 1) + '"]');
+    if (btn) actions["lesson-apply"](btn);
+  }
 }
 
 function init() {
   const saved = load();
   if (saved) state = Object.assign(fresh(), saved);
+  if (!state.path) state.path = {};
+  if (!state.review) state.review = {};
   if (!state.profiles.some((p) => p.id === state.activeId)) {
     state.activeId = state.profiles[0] ? state.profiles[0].id : null;
   }
@@ -1132,5 +1552,8 @@ function init() {
   app.addEventListener("click", onClick);
   document.addEventListener("keydown", onKey);
   render();
+  if (location.protocol.indexOf("http") === 0 && "serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
 }
 init();

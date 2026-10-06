@@ -93,6 +93,36 @@ button:focus-visible, input:focus-visible {
 }
 .goal span { display: block; color: var(--muted); font-size: 12px; font-weight: 650; margin-top: 2px; }
 .goal.done { background: var(--teal-s); }
+.lesson-card {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: #2a2118;
+  color: #fff;
+  border-radius: 22px;
+  padding: 16px;
+  margin: 12px 0;
+  box-shadow: 0 8px 0 #1a140e;
+}
+.lesson-card .kicker { color: #ffc857; }
+.lesson-card b { display: block; font-size: 22px; margin: 4px 0; }
+.lesson-card span { color: #f3e6d8; font-size: 14px; line-height: 1.45; }
+.lesson-card .mini-steps { margin-top: 10px; font-weight: 800; letter-spacing: 0.04em; color: #ffc857; }
+.lesson-card.done { background: #14967c; box-shadow: 0 8px 0 #0c705c; }
+.lesson-card.done .kicker, .lesson-card.done .mini-steps { color: #fff8e8; }
+.stepbar { display: flex; gap: 6px; margin: 0 0 10px; }
+.stepbar span {
+  flex: 1;
+  text-align: center;
+  background: #fff;
+  border-radius: 999px;
+  padding: 6px 0;
+  font-weight: 800;
+  color: var(--muted);
+  font-size: 13px;
+}
+.stepbar span.now { background: var(--ink); color: #fff; }
+.stepbar span.done { background: var(--teal-s); color: var(--teal); }
 
 .level-switch { display: flex; gap: 6px; margin: 8px 0 12px; }
 .level-switch button, .chip, .ghost, .primary, .sun {
