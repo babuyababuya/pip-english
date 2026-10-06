@@ -1,4 +1,4 @@
-const CACHE = "pip-english-02";
+const CACHE = "pip-english-03";
 const FILES = [
   "./",
   "./index.html",
@@ -6,6 +6,7 @@ const FILES = [
   "./js/data.js",
   "./js/locale.js",
   "./js/app.js",
+  "./js/visit.js",
   "./manifest.webmanifest",
   "./icon-192.png",
   "./icon-512.png"
@@ -23,6 +24,8 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
   event.respondWith(
     fetch(event.request).then((response) => {
       const copy = response.clone();
