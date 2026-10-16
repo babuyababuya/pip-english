@@ -146,7 +146,16 @@ button:focus-visible, input:focus-visible {
 .pack-open { width: 100%; border: 0; background: transparent; text-align: left; padding: 12px 36px 12px 12px; }
 .pack-open b, .pack-open small { display: block; }
 .pack-open small { color: var(--muted); font-weight: 650; margin-top: 2px; }
-.pack-like { position: absolute; top: 6px; right: 6px; border: 0; background: transparent; font-size: 18px; }
+#app.spot .main { overflow: hidden; }
+.spot-page { flex: 1; min-height: 0; overflow: hidden; overscroll-behavior: contain; touch-action: none; }
+.spot-page .chat { flex: 1; min-height: 72px; }
+.spot-head { justify-content: space-between; }
+.spot-head span { color: var(--muted); font-weight: 800; font-size: 13px; }
+.swipe-hint { text-align: center; color: var(--muted); font-weight: 800; font-size: 13px; padding: 0 0 8px; }
+.spot-page.enter-up { animation: spotInUp 280ms ease; }
+.spot-page.enter-down { animation: spotInDown 280ms ease; }
+@keyframes spotInUp { from { transform: translateY(36px); opacity: 0.45; } to { transform: none; opacity: 1; } }
+@keyframes spotInDown { from { transform: translateY(-36px); opacity: 0.45; } to { transform: none; opacity: 1; } }
 .stepbar { display: flex; gap: 6px; margin: 0 0 10px; }
 .stepbar span {
   flex: 1;

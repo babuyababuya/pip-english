@@ -657,6 +657,67 @@ function suggestScene() {
   const day = Math.floor(Date.now() / 86400000);
   return list[day % list.length];
 }
+function moveSpot(step) {
+  const list = PIP_WORLD.scenes;
+  const index = list.findIndex((scene) => scene.id === ui.spotId);
+  const next = index + step;
+  const en = uiLang() === "en";
+  if (index < 0 || next < 0 || next >= list.length) {
+    toast(step > 0 ? (en ? "That's the last scene" : "已经是最后一个场景") : (en ? "That's the first scene" : "已经是第一个场景"));
+    return;
+  }
+  stopSpeak();
+  ui.spotId = list[next].id;
+  ui.spotWhy = "";
+  ui.spotMotion = step > 0 ? "up" : "down";
+  render();
+  speak(fill(list[next].lines[0].en));
+}
+function bindSpotSwipe() {
+  const root = document.querySelector(".spot-page");
+  if (!root) return;
+  let start = null;
+  let wheelLock = 0;
+  const begin = (x, y, target) => {
+    if (target && target.closest && target.closest("button, a, input")) return false;
+    start = { x: x, y: y, t: Date.now(), top: root.scrollTop };
+    return true;
+  };
+  const finish = (x, y) => {
+    if (!start || ui.screen !== "spot") return;
+    const dy = y - start.y;
+    const dx = x - start.x;
+    const dt = Date.now() - start.t;
+    const scrolled = Math.abs(root.scrollTop - start.top) > 8;
+    start = null;
+    root.style.transform = "";
+    if (scrolled) return;
+    if (dt > 500) return;
+    if (Math.abs(dy) < 64 || Math.abs(dy) < Math.abs(dx) * 1.15) return;
+    moveSpot(dy < 0 ? 1 : -1);
+  };
+  root.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    if (!begin(e.clientX, e.clientY, e.target)) return;
+    if (root.setPointerCapture) root.setPointerCapture(e.pointerId);
+  });
+  root.addEventListener("pointermove", (e) => {
+    if (!start) return;
+    const dy = e.clientY - start.y;
+    if (Math.abs(dy) < 8) return;
+    root.style.transform = "translateY(" + Math.max(-72, Math.min(72, dy * 0.28)) + "px)";
+  });
+  root.addEventListener("pointerup", (e) => finish(e.clientX, e.clientY));
+  root.addEventListener("pointercancel", () => { start = null; root.style.transform = ""; });
+  root.addEventListener("wheel", (e) => {
+    if (Math.abs(e.deltaY) < 28 || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+    e.preventDefault();
+    const now = Date.now();
+    if (now - wheelLock < 480) return;
+    wheelLock = now;
+    moveSpot(e.deltaY > 0 ? 1 : -1);
+  }, { passive: false });
+}
 function worldHomeCard() {
   if (!globalThis.PIP_WORLD || !active()) return "";
   const en = uiLang() === "en";
@@ -770,7 +831,7 @@ function render() {
   if (!playing && playScreens.indexOf(ui.screen) >= 0) ui.screen = "home";
   const bare = ui.screen === "onboard";
   const app = document.getElementById("app");
-  app.className = bare ? "bare" : "";
+  app.className = bare ? "bare" : ui.screen === "spot" ? "spot" : "";
   const body = (screens[ui.screen] || screens.home)();
   const lang = uiLang();
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
@@ -778,6 +839,7 @@ function render() {
   app.innerHTML = bare ? body : layout(body);
   const chat = document.querySelector(".chat");
   if (chat) chat.scrollTop = chat.scrollHeight;
+  if (ui.screen === "spot") bindSpotSwipe();
 }
 
 function layout(body) {
@@ -1154,8 +1216,17 @@ const screens = {
     const bubbles = scene.lines.map((line) => `<div class="bubble ${line.who === "me" ? "me" : "pip"}"><div class="en">${esc(fill(line.en))}</div>${en ? "" : `<div class="zh">${esc(fill(line.zh))}</div>`}</div>`).join("");
     const words = scene.words.map((word) => `<button class="pill" data-act="say" data-text="${esc(word.en)}">${esc(word.en)}${en ? "" : " · " + esc(word.zh)}</button>`).join("");
     const choices = scene.choices.map((choice, i) => `<button class="choice" data-act="spot-pick" data-i="${i}"><b>${esc(fill(choice.en))}</b>${en ? "" : `<small>${esc(fill(choice.zh))}</small>`}</button>`).join("");
-    return `<section class="stage">
-      <div class="play-top"><button class="ghost" data-act="open-pack" data-id="${scene.pack}">${en ? "Back" : "返回"}</button><b>${scene.emoji} ${esc(en ? scene.en : scene.zh)}</b></div>
+    const feed = PIP_WORLD.scenes;
+    const at = feed.findIndex((item) => item.id === scene.id);
+    const upcoming = feed[at + 1];
+    const hint = upcoming
+      ? (en ? "Swipe up · " + upcoming.en : "上滑 · " + upcoming.zh)
+      : (en ? "Last scene" : "已经是最后一个");
+    const motion = ui.spotMotion === "down" ? "enter-down" : ui.spotMotion === "up" ? "enter-up" : "";
+    ui.spotMotion = "";
+    return `<section class="stage spot-page ${motion}">
+      <div class="play-top spot-head"><b>${scene.emoji} ${esc(en ? scene.en : scene.zh)}</b><span>${at + 1}/${feed.length}</span></div>
+      <div class="swipe-hint">${esc(hint)}</div>
       <div class="chat">${bubbles}</div>
       <div class="actions"><button class="sun" data-act="spot-hear">${en ? "Listen" : "听一遍"}</button></div>
       <div class="pills">${words}</div>
