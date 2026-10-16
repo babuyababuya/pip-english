@@ -127,10 +127,11 @@ function burst() {
 function beep(kind) {
   if (state.mute) return;
   try {
-    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    audioCtx.resume();
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audioCtx = audioCtx || new AC();
     const notes = kind === "bad" ? [220, 180] : kind === "combo" ? [523, 659, 784, 1046] : [523, 659, 784];
-    notes.forEach((freq, i) => {
+    const play = () => notes.forEach((freq, i) => {
       const o = audioCtx.createOscillator();
       const g = audioCtx.createGain();
       o.type = kind === "bad" ? "triangle" : "sine";
@@ -144,34 +145,126 @@ function beep(kind) {
       o.start(t);
       o.stop(t + 0.17);
     });
+    if (audioCtx.state === "suspended") audioCtx.resume().then(play).catch(() => {});
+    else play();
   } catch (e) { /* audio optional */ }
+}
+const liveUtterances = [];
+let speechWarned = false;
+let muteWarned = false;
+let speakPump = 0;
+function handheld() {
+  return navigator.maxTouchPoints > 1 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+}
+function speechParts(text) {
+  const raw = String(text).replace(/\s+/g, " ").trim();
+  if (!raw) return [];
+  const parts = [];
+  let buf = "";
+  for (const ch of raw) {
+    buf += ch;
+    if ("。！？.!?".includes(ch)) {
+      const bit = buf.trim();
+      if (bit) parts.push(bit);
+      buf = "";
+    }
+  }
+  if (buf.trim()) parts.push(buf.trim());
+  return (parts.length ? parts : [raw]).filter((part) => /[A-Za-z0-9\u4e00-\u9fff]/.test(part));
+}
+function pickVoice(lang) {
+  const voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+  const want = String(lang || "en-US").toLowerCase().replace("_", "-");
+  const prefix = want.slice(0, 2);
+  const same = voices.filter((v) => String(v.lang || "").toLowerCase().replace("_", "-").startsWith(prefix));
+  const local = same.filter((v) => v.localService);
+  const pool = local.length ? local : (handheld() ? [] : same);
+  return pool.find((v) => String(v.lang || "").toLowerCase().replace("_", "-") === want) || pool[0] || null;
+}
+function warnSpeech() {
+  if (speechWarned) return;
+  speechWarned = true;
+  toast(uiLang() === "en"
+    ? "This phone browser is not playing sound. Open the page in Safari or Chrome."
+    : "这个手机浏览器没有把声音放出来。请换 Safari 或 Chrome 打开。");
+}
+function iosDevice() {
+  const ua = navigator.userAgent || "";
+  return /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+function pumpSpeech() {
+  clearInterval(speakPump);
+  if (!window.speechSynthesis || !iosDevice()) return;
+  speakPump = setInterval(() => {
+    const synth = speechSynthesis;
+    if (!synth.speaking) {
+      clearInterval(speakPump);
+      speakPump = 0;
+      return;
+    }
+    synth.pause();
+    synth.resume();
+  }, 8000);
 }
 function stopSpeak() {
   speakToken += 1;
-  if (window.speechSynthesis) speechSynthesis.cancel();
+  liveUtterances.length = 0;
+  const synth = window.speechSynthesis;
+  if (synth && (synth.speaking || synth.pending)) synth.cancel();
 }
 function speak(text, lang) {
   if (!window.speechSynthesis || !text) return;
+  if (state.mute) {
+    if (!muteWarned) {
+      muteWarned = true;
+      toast(uiLang() === "en" ? "Sound is off. Tap the speaker at the top." : "声音关着。点右上角的喇叭再听。");
+    }
+    return;
+  }
   const synth = speechSynthesis;
   const my = ++speakToken;
+  const language = lang || "en-US";
+  const phone = handheld();
+  const parts = speechParts(text);
+  let started = false;
   const run = () => {
     if (my !== speakToken) return;
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = lang || "en-US";
-    const voices = synth.getVoices();
-    const want = (u.lang || "").toLowerCase();
-    const voice = voices.find((v) => (v.lang || "").toLowerCase() === want)
-      || voices.find((v) => (v.lang || "").toLowerCase().startsWith(want.slice(0, 2)));
-    if (voice) u.voice = voice;
+    const voice = pickVoice(language);
     const starter = active() && active().level === "starter";
-    u.rate = want.startsWith("zh") ? 1 : (starter ? 0.84 : 0.95);
-    synth.speak(u);
+    const want = language.toLowerCase();
+    parts.forEach((part) => {
+      const u = new SpeechSynthesisUtterance(part);
+      u.lang = language;
+      if (voice) u.voice = voice;
+      u.rate = phone ? 1 : (want.startsWith("zh") ? 1 : (starter ? 0.84 : 0.95));
+      u.pitch = 1;
+      u.volume = 1;
+      liveUtterances.push(u);
+      const drop = () => {
+        const at = liveUtterances.indexOf(u);
+        if (at >= 0) liveUtterances.splice(at, 1);
+      };
+      u.onstart = () => { started = true; };
+      u.onend = drop;
+      u.onerror = (ev) => {
+        drop();
+        const reason = ev && ev.error;
+        if (reason === "interrupted" || reason === "canceled" || reason === "cancelled") return;
+        if (my === speakToken) warnSpeech();
+      };
+      synth.speak(u);
+    });
+    if (synth.paused) synth.resume();
+    pumpSpeech();
   };
-  if (synth.speaking) {
-    synth.cancel();
-    setTimeout(run, 70);
-  } else {
-    run();
+  const busy = synth.speaking || synth.pending;
+  if (busy) synth.cancel();
+  if (!phone && busy) setTimeout(run, 60);
+  else run();
+  if (phone) {
+    setTimeout(() => {
+      if (my === speakToken && !started) warnSpeech();
+    }, 2500);
   }
 }
 function stopListen() {
@@ -1887,7 +1980,25 @@ function init() {
     state.activeId = state.profiles[0] ? state.profiles[0].id : null;
   }
   ui.screen = state.profiles.length ? "home" : "onboard";
-  if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => {};
+  const primeAudio = () => {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) {
+        audioCtx = audioCtx || new AC();
+        if (audioCtx.state === "suspended") audioCtx.resume();
+      }
+    } catch (e) { /* optional */ }
+    if (window.speechSynthesis) {
+      speechSynthesis.getVoices();
+      if (speechSynthesis.paused) speechSynthesis.resume();
+    }
+  };
+  document.addEventListener("touchstart", primeAudio, { capture: true, passive: true });
+  document.addEventListener("pointerdown", primeAudio, { capture: true, passive: true });
+  if (window.speechSynthesis) {
+    speechSynthesis.getVoices();
+    speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+  }
   const app = document.getElementById("app");
   app.addEventListener("click", onClick);
   document.addEventListener("keydown", onKey);
