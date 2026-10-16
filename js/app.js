@@ -773,7 +773,8 @@ function bindSpotSwipe() {
   let wheelLock = 0;
   const begin = (x, y, target) => {
     if (target && target.closest && target.closest("button, a, input")) return false;
-    start = { x: x, y: y, t: Date.now(), top: root.scrollTop };
+    const scroller = target && target.closest ? target.closest(".spot-scroll") : null;
+    start = { x: x, y: y, t: Date.now(), scroller: scroller, top: scroller ? scroller.scrollTop : 0 };
     return true;
   };
   const finish = (x, y) => {
@@ -781,7 +782,7 @@ function bindSpotSwipe() {
     const dy = y - start.y;
     const dx = x - start.x;
     const dt = Date.now() - start.t;
-    const scrolled = Math.abs(root.scrollTop - start.top) > 8;
+    const scrolled = start.scroller && Math.abs(start.scroller.scrollTop - start.top) > 8;
     start = null;
     root.style.transform = "";
     if (scrolled) return;
@@ -798,12 +799,24 @@ function bindSpotSwipe() {
     if (!start) return;
     const dy = e.clientY - start.y;
     if (Math.abs(dy) < 8) return;
+    if (start.scroller) {
+      const el = start.scroller;
+      const canUp = el.scrollTop > 0;
+      const canDown = el.scrollTop + el.clientHeight < el.scrollHeight - 2;
+      if ((dy > 0 && canUp) || (dy < 0 && canDown)) return;
+    }
     root.style.transform = "translateY(" + Math.max(-72, Math.min(72, dy * 0.28)) + "px)";
   });
   root.addEventListener("pointerup", (e) => finish(e.clientX, e.clientY));
   root.addEventListener("pointercancel", () => { start = null; root.style.transform = ""; });
   root.addEventListener("wheel", (e) => {
     if (Math.abs(e.deltaY) < 28 || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+    const scroller = e.target.closest && e.target.closest(".spot-scroll");
+    if (scroller) {
+      const atTop = scroller.scrollTop <= 0;
+      const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
+      if ((e.deltaY > 0 && !atBottom) || (e.deltaY < 0 && !atTop)) return;
+    }
     e.preventDefault();
     const now = Date.now();
     if (now - wheelLock < 480) return;
@@ -1321,6 +1334,7 @@ const screens = {
       <div class="play-top spot-head"><b>${scene.emoji} ${esc(en ? scene.en : scene.zh)}</b><span>${at + 1}/${feed.length}</span></div>
       <div class="swipe-hint">${esc(hint)}</div>
       <div class="chat">${bubbles}</div>
+      <div class="spot-scroll">
       <div class="actions"><button class="sun" data-act="spot-hear">${en ? "Listen" : "听一遍"}</button></div>
       <div class="pills">${words}</div>
       <div class="prompt">
@@ -1329,6 +1343,7 @@ const screens = {
       </div>
       <div class="choices">${choices}</div>
       ${ui.spotWhy ? `<div class="why">${esc(ui.spotWhy)}</div>` : ""}
+      </div>
     </section>`;
   },
   about() {

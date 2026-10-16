@@ -148,7 +148,12 @@ button:focus-visible, input:focus-visible {
 .pack-open small { color: var(--muted); font-weight: 650; margin-top: 2px; }
 #app.spot .main { overflow: hidden; }
 .spot-page { flex: 1; min-height: 0; overflow: hidden; overscroll-behavior: contain; touch-action: none; }
-.spot-page .chat { flex: 1; min-height: 72px; }
+.spot-page .chat { flex: 0 1 80px; min-height: 48px; max-height: 80px; overflow: auto; }
+.spot-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; touch-action: pan-y; padding-bottom: 8px; }
+.spot-page .actions { margin-top: 4px; }
+.spot-page .prompt { padding: 12px 14px; margin-bottom: 8px; }
+.spot-page .prompt h2 { font-size: 22px; line-height: 1.35; }
+.spot-page .choice { padding: 12px; }
 .spot-head { justify-content: space-between; }
 .spot-head span { color: var(--muted); font-weight: 800; font-size: 13px; }
 .swipe-hint { text-align: center; color: var(--muted); font-weight: 800; font-size: 13px; padding: 0 0 8px; }

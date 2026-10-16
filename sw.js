@@ -1,4 +1,4 @@
-const CACHE = "pip-english-07";
+const CACHE = "pip-english-08";
 const FILES = [
   "./",
   "./index.html",
