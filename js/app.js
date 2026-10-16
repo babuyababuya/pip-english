@@ -11,7 +11,7 @@ let speakToken = 0;
 let audioCtx = null;
 
 function fresh() {
-  return { v: 1, mute: false, lang: "", profiles: [], activeId: null, stars: {}, learned: {}, streak: {}, daily: {}, path: {}, review: {} };
+  return { v: 1, mute: false, lang: "", profiles: [], activeId: null, stars: {}, learned: {}, streak: {}, daily: {}, path: {}, review: {}, likes: {}, spots: {} };
 }
 function blankUi() {
   return {
@@ -27,7 +27,10 @@ function blankUi() {
     resetArmed: false,
     listening: false,
     rec: null,
-    showZh: true
+    showZh: true,
+    packId: null,
+    spotId: null,
+    spotWhy: ""
   };
 }
 function rid() {
@@ -629,6 +632,46 @@ function lessonPath() {
   }).join("");
   return `<div class="row-title"><h2>${en ? "This level" : "这一级的课"}</h2><p>${learnedN}/${list.length}</p></div><div class="path-list">${items}</div>`;
 }
+function worldPack(id) {
+  return (globalThis.PIP_WORLD && PIP_WORLD.packs.find((pack) => pack.id === id)) || null;
+}
+function packScenes(id) {
+  return PIP_WORLD.scenes.filter((scene) => scene.pack === id);
+}
+function likeIds(pid) {
+  if (!state.likes[pid]) state.likes[pid] = [];
+  return state.likes[pid];
+}
+function spotIds(pid) {
+  if (!state.spots[pid]) state.spots[pid] = [];
+  return state.spots[pid];
+}
+function spotDone(pid, id) {
+  return spotIds(pid).indexOf(id) >= 0;
+}
+function suggestScene() {
+  const likes = likeIds(active().id);
+  const pool = PIP_WORLD.scenes.filter((scene) => !likes.length || likes.indexOf(scene.pack) >= 0);
+  const undone = pool.filter((scene) => !spotDone(active().id, scene.id));
+  const list = undone.length ? undone : pool;
+  const day = Math.floor(Date.now() / 86400000);
+  return list[day % list.length];
+}
+function worldHomeCard() {
+  if (!globalThis.PIP_WORLD || !active()) return "";
+  const en = uiLang() === "en";
+  const scene = suggestScene();
+  const pack = worldPack(scene.pack);
+  const likes = likeIds(active().id);
+  return `<button class="lesson-card world-card" data-act="nav" data-to="world">
+    <div class="kicker">${en ? "0.3 · Follow your interests" : "0.3 · 按兴趣学"}</div>
+    <b>${scene.emoji} ${esc(en ? scene.en : scene.zh)}</b>
+    <span>${likes.length
+      ? (en ? "A scene from the life you marked. Listen, then answer in one line." : "从你标了喜欢的生活里挑一个。先听对话，再用一句话接上。")
+      : (en ? "Choose a few everyday situations you actually care about." : "先选出你感兴趣的几件生活小事。")}</span>
+    <div class="mini-steps">${pack ? pack.emoji + " " : ""}${en ? "132 real-life scenes" : "132 个生活场景"}</div>
+  </button>`;
+}
 function startLesson(lessonId) {
   const person = active();
   const list = lessonList(person.level);
@@ -742,7 +785,8 @@ function layout(body) {
   const stars = p ? (state.stars[p.id] || 0) : 0;
   const navOn = ui.screen === "hunt" || ui.screen === "hunt-setup" ? "hunt"
     : ui.screen === "scene" || ui.screen === "scenes" ? "scenes"
-    : ui.screen === "oops" ? "oops" : "home";
+    : ui.screen === "oops" ? "oops"
+    : ui.screen === "world" || ui.screen === "pack" || ui.screen === "spot" ? "world" : "home";
   const en = uiLang() === "en";
   return `
     <header class="top">
@@ -759,6 +803,7 @@ function layout(body) {
     <main class="main">${body}</main>
     <nav class="nav">
       ${navBtn("home", en ? "Home" : "首页", "🏠", navOn)}
+      ${navBtn("world", en ? "Life" : "兴趣", "🌍", navOn)}
       ${navBtn("hunt", en ? "Words" : "寻宝", "💎", navOn)}
       ${navBtn("scenes", en ? "Scenes" : "剧场", "🎭", navOn)}
       ${navBtn("oops", en ? "Fix" : "纠错", "🔍", navOn)}
@@ -788,7 +833,7 @@ const screens = {
     if (ui.step === "who") {
       return `<section class="onboard">
         ${parrot("happy")}
-        <p class="kicker">${en ? "English buddy · 0.2" : "英语学习伴侣 · 0.2"}</p>
+        <p class="kicker">${en ? "English buddy · 0.3" : "英语学习伴侣 · 0.3"}</p>
         <h1 class="greet">${ui.adding ? (en ? "Add someone" : "再加一位家人") : (en ? "Hi, I'm Pip" : "嗨，我是皮皮")}</h1>
         <p class="sub">${en
           ? "One lesson a day: listen to three sentences, practice them, say them, then use them in a short chat."
@@ -830,6 +875,7 @@ const screens = {
       </section>
       ${lessonHomeCard()}
       ${lessonPath()}
+      ${worldHomeCard()}
       ${!standalone ? `<p class="hint">${en ? "On a phone: open the browser menu and choose Add to Home Screen. Pip then opens like an app." : "手机浏览器菜单里选「添加到主屏幕」，就能像 App 一样打开。"}</p>` : ""}
       <div class="quote">
         <div class="quote-en">${esc(q.en)}</div>
@@ -1046,12 +1092,89 @@ const screens = {
       </div>
     </section>`;
   },
+  world() {
+    const en = uiLang() === "en";
+    const pid = active().id;
+    const likes = likeIds(pid);
+    const scene = suggestScene();
+    return `<section>
+      <div class="panel">
+        <h2>${en ? "What do you feel like today?" : "今天想练哪块生活？"}</h2>
+        <p>${en ? "Heart the situations you care about. Open a pack, listen to a short chat, then answer in one line." : "给感兴趣的生活点爱心。点开一组，听一段短对话，再用一句话接上。"}</p>
+        <p class="hint">${spotIds(pid).length}/132</p>
+      </div>
+      <button class="play-card" data-act="open-spot" data-id="${scene.id}">
+        <span class="emoji-badge">${scene.emoji}</span>
+        <span><b>${en ? "Try this one" : "先玩这个"}</b><span>${esc(en ? scene.en : scene.zh)}</span></span>
+        <span class="chev">›</span>
+      </button>
+      <div class="pack-grid">
+        ${PIP_WORLD.packs.map((pack) => {
+          const scenes = packScenes(pack.id);
+          const got = scenes.filter((item) => spotDone(pid, item.id)).length;
+          const on = likes.indexOf(pack.id) >= 0;
+          return `<div class="pack-card ${on ? "on" : ""}">
+            <button class="pack-open" data-act="open-pack" data-id="${pack.id}">
+              <span class="emoji-badge">${pack.emoji}</span>
+              <b>${esc(en ? pack.en : pack.zh)}</b>
+              <small>${got}/${scenes.length}${en ? "" : " · " + esc(pack.blurb)}</small>
+            </button>
+            <button class="pack-like" data-act="like-pack" data-id="${pack.id}" aria-label="${en ? "Follow" : "感兴趣"}">${on ? "♥" : "♡"}</button>
+          </div>`;
+        }).join("")}
+      </div>
+    </section>`;
+  },
+  pack() {
+    const pack = worldPack(ui.packId);
+    if (!pack) return screens.world();
+    const en = uiLang() === "en";
+    const pid = active().id;
+    const scenes = packScenes(pack.id);
+    const got = scenes.filter((item) => spotDone(pid, item.id)).length;
+    return `<section>
+      <div class="play-top"><button class="ghost" data-act="nav" data-to="world">${en ? "All" : "全部"}</button><b>${pack.emoji} ${esc(en ? pack.en : pack.zh)}</b></div>
+      <p class="hint">${got}/${scenes.length}</p>
+      <div class="path-list">
+        ${scenes.map((scene) => {
+          const done = spotDone(pid, scene.id);
+          return `<button class="path-item ${done ? "done" : "now"}" data-act="open-spot" data-id="${scene.id}">
+            <span class="mark">${done ? "✓" : scene.emoji}</span>
+            <span><b>${esc(en ? scene.en : scene.zh)}</b><small>${done ? (en ? "Learned" : "学过了") : scene.words.map((word) => word.en).join(" · ")}</small></span>
+          </button>`;
+        }).join("")}
+      </div>
+    </section>`;
+  },
+  spot() {
+    const scene = PIP_WORLD.scenes.find((item) => item.id === ui.spotId);
+    if (!scene) return screens.world();
+    const en = uiLang() === "en";
+    const done = spotDone(active().id, scene.id);
+    const bubbles = scene.lines.map((line) => `<div class="bubble ${line.who === "me" ? "me" : "pip"}"><div class="en">${esc(fill(line.en))}</div>${en ? "" : `<div class="zh">${esc(fill(line.zh))}</div>`}</div>`).join("");
+    const words = scene.words.map((word) => `<button class="pill" data-act="say" data-text="${esc(word.en)}">${esc(word.en)}${en ? "" : " · " + esc(word.zh)}</button>`).join("");
+    const choices = scene.choices.map((choice, i) => `<button class="choice" data-act="spot-pick" data-i="${i}"><b>${esc(fill(choice.en))}</b>${en ? "" : `<small>${esc(fill(choice.zh))}</small>`}</button>`).join("");
+    return `<section class="stage">
+      <div class="play-top"><button class="ghost" data-act="open-pack" data-id="${scene.pack}">${en ? "Back" : "返回"}</button><b>${scene.emoji} ${esc(en ? scene.en : scene.zh)}</b></div>
+      <div class="chat">${bubbles}</div>
+      <div class="actions"><button class="sun" data-act="spot-hear">${en ? "Listen" : "听一遍"}</button></div>
+      <div class="pills">${words}</div>
+      <div class="prompt">
+        <p class="hint">${done ? (en ? "You already learned this. You can answer again." : "这句学过了，还可以再接一次。") : (en ? "How do you answer?" : "你怎么接？")}</p>
+        <h2>${esc(en ? scene.prompt.en : scene.prompt.zh)}</h2>
+      </div>
+      <div class="choices">${choices}</div>
+      ${ui.spotWhy ? `<div class="why">${esc(ui.spotWhy)}</div>` : ""}
+    </section>`;
+  },
   about() {
     const en = uiLang() === "en";
     if (en) {
       return `<section class="panel about">
-        <h2>Pip English 0.2</h2>
-        <p>A short daily English lesson. Progress stays in this browser and is not uploaded.</p>
+        <h2>Pip English 0.3</h2>
+        <p>A short daily English lesson, plus everyday conversations you can choose by interest. Progress stays in this browser and is not uploaded.</p>
+        <h3>Interest packs</h3>
+        <p>132 short scenes from the situations English courses practice most: meeting people, food, shopping, travel, work, health, school, and free time. Follow the ones you like, listen, then answer in one line.</p>
         <h3>Today's lesson</h3>
         <p>Learn, practice, speak, use. Listen to three everyday sentences, fill the blanks, say the whole sentence, then use it in a tiny chat. Speaking checks the whole sentence. It does not score individual sounds.</p>
         <h3>Install</h3>
@@ -1064,8 +1187,10 @@ const screens = {
       </section>`;
     }
     return `<section class="panel about">
-      <h2>皮皮英语 0.2</h2>
-      <p>给自己和孩子的英语小伙伴。进度只存在这台浏览器里，不上传。</p>
+      <h2>皮皮英语 0.3</h2>
+      <p>给自己和孩子的英语小伙伴。每天一课还在，另外可以按兴趣练生活对话。进度只存在这台浏览器里，不上传。</p>
+      <h3>兴趣世界</h3>
+      <p>132 个短场景，来自外教课最常练的生活：认识人、吃喝、购物、出行、旅行、工作、健康、校园和闲聊。点爱心跟着学，先听对话，再用一句话接上。</p>
       <h3>今日一课</h3>
       <p>学、练、说、用。先听生活里会说的三句，补全句子，再整句跟读，最后放进一段小对话。跟读只判断整句像不像，不假装做音标打分。</p>
       <h3>安装</h3>
@@ -1518,6 +1643,66 @@ const actions = {
     render();
     speak(fill(s.lesson.apply[s.applyIndex].pip.en));
   },
+  "open-pack"(el) {
+    ui.packId = el.dataset.id;
+    ui.spotWhy = "";
+    ui.screen = "pack";
+    render();
+  },
+  "like-pack"(el) {
+    const list = likeIds(active().id);
+    const id = el.dataset.id;
+    const at = list.indexOf(id);
+    if (at >= 0) list.splice(at, 1);
+    else list.push(id);
+    save();
+    render();
+  },
+  "open-spot"(el) {
+    ui.spotId = el.dataset.id;
+    ui.spotWhy = "";
+    ui.screen = "spot";
+    render();
+    const scene = PIP_WORLD.scenes.find((item) => item.id === ui.spotId);
+    if (scene) speak(fill(scene.lines[0].en));
+  },
+  "spot-hear"() {
+    const scene = PIP_WORLD.scenes.find((item) => item.id === ui.spotId);
+    if (!scene) return;
+    speak(scene.lines.map((line) => fill(line.en)).join(". "));
+  },
+  "spot-pick"(el) {
+    const scene = PIP_WORLD.scenes.find((item) => item.id === ui.spotId);
+    if (!scene) return;
+    const choice = scene.choices[Number(el.dataset.i)];
+    const en = uiLang() === "en";
+    if (!choice.ok) {
+      ui.spotWhy = en ? "Use the line from the chat." : "用对话里那一句再试一次。";
+      ui.mood = "oops";
+      beep("bad");
+      render();
+      return;
+    }
+    const pid = active().id;
+    const first = !spotDone(pid, scene.id);
+    if (first) {
+      spotIds(pid).push(scene.id);
+      giveStars(pid, 1);
+      scene.words.forEach((word) => remember(pid, word.en));
+      remember(pid, fill(choice.en));
+      touchStreak(pid);
+      save();
+      burst();
+    }
+    ui.spotWhy = en ? "That fits this conversation." : "这句接得上。";
+    ui.mood = "happy";
+    beep("ok");
+    render();
+    speak(fill(choice.en));
+    if (first && packScenes(scene.pack).every((item) => spotDone(pid, item.id))) {
+      toast(en ? "You finished this pack." : "这一组兴趣学完了。");
+    }
+  },
   say(el) { speak(el.dataset.text, "en-US"); },
   "say-zh"(el) { speak(el.dataset.text, "zh-CN"); },
   again() {
@@ -1624,6 +1809,8 @@ function init() {
   if (!state.path) state.path = {};
   if (!state.review) state.review = {};
   if (!state.cleared) state.cleared = {};
+  if (!state.likes) state.likes = {};
+  if (!state.spots) state.spots = {};
   backfillCleared();
   if (!state.profiles.some((p) => p.id === state.activeId)) {
     state.activeId = state.profiles[0] ? state.profiles[0].id : null;

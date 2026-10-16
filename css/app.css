@@ -138,6 +138,15 @@ button:focus-visible, input:focus-visible {
 .path-item.done .mark { background: var(--teal); color: #fff; }
 .path-item.now .mark { background: var(--ink); color: #fff; }
 .path-item.later { opacity: 0.72; }
+.world-card { background: #245c8a; box-shadow: 0 8px 0 #163e5e; }
+.world-card .kicker, .world-card .mini-steps { color: #d7f4ea; }
+.pack-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pack-card { position: relative; background: #fff; border-radius: 18px; box-shadow: var(--shadow); }
+.pack-card.on { outline: 3px solid var(--teal); }
+.pack-open { width: 100%; border: 0; background: transparent; text-align: left; padding: 12px 36px 12px 12px; }
+.pack-open b, .pack-open small { display: block; }
+.pack-open small { color: var(--muted); font-weight: 650; margin-top: 2px; }
+.pack-like { position: absolute; top: 6px; right: 6px; border: 0; background: transparent; font-size: 18px; }
 .stepbar { display: flex; gap: 6px; margin: 0 0 10px; }
 .stepbar span {
   flex: 1;
@@ -349,11 +358,11 @@ button:focus-visible, input:focus-visible {
   background: #fff;
   border-radius: 22px;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   padding: 6px;
   box-shadow: 0 10px 30px rgba(80, 42, 12, 0.12);
 }
-.nav button { border: 0; background: transparent; border-radius: 16px; padding: 8px 4px; font-weight: 800; font-size: 13px; color: var(--muted); }
+.nav button { border: 0; background: transparent; border-radius: 16px; padding: 8px 2px; font-weight: 800; font-size: 12px; color: var(--muted); }
 .nav button.on { background: #fff1e6; color: var(--ink); }
 .nav small { display: block; font-size: 16px; }
 

@@ -1,10 +1,11 @@
-const CACHE = "pip-english-04";
+const CACHE = "pip-english-05";
 const FILES = [
   "./",
   "./index.html",
   "./css/app.css",
   "./js/data.js",
   "./js/locale.js",
+  "./js/world.js",
   "./js/app.js",
   "./js/visit.js",
   "./manifest.webmanifest",
