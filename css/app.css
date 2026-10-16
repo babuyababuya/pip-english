@@ -110,6 +110,34 @@ button:focus-visible, input:focus-visible {
 .lesson-card .mini-steps { margin-top: 10px; font-weight: 800; letter-spacing: 0.04em; color: #ffc857; }
 .lesson-card.done { background: #14967c; box-shadow: 0 8px 0 #0c705c; }
 .lesson-card.done .kicker, .lesson-card.done .mini-steps { color: #fff8e8; }
+.path-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.path-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: #fff;
+  border-radius: 16px;
+  padding: 10px 12px;
+  box-shadow: var(--shadow);
+}
+.path-item b { display: block; }
+.path-item small { display: block; color: var(--muted); font-weight: 650; font-size: 12px; line-height: 1.4; }
+.path-item .mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: #f3e6d8;
+  font-weight: 800;
+  flex: none;
+}
+.path-item.done .mark { background: var(--teal); color: #fff; }
+.path-item.now .mark { background: var(--ink); color: #fff; }
+.path-item.later { opacity: 0.72; }
 .stepbar { display: flex; gap: 6px; margin: 0 0 10px; }
 .stepbar span {
   flex: 1;

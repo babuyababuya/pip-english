@@ -524,11 +524,44 @@ function lessonCursor(pid, level) {
   if (!state.path[pid]) state.path[pid] = {};
   return state.path[pid][level] || 0;
 }
+function clearedIds(pid) {
+  if (!state.cleared) state.cleared = {};
+  if (!state.cleared[pid]) state.cleared[pid] = [];
+  return state.cleared[pid];
+}
+function lessonDone(pid, id) {
+  return clearedIds(pid).indexOf(id) >= 0;
+}
+function backfillCleared() {
+  if (!state.path) state.path = {};
+  let changed = false;
+  state.profiles.forEach((person) => {
+    const path = state.path[person.id] || {};
+    LEVELS.forEach((lv) => {
+      const list = lessonList(lv.id);
+      const count = Math.min(path[lv.id] || 0, list.length);
+      const ids = clearedIds(person.id);
+      for (let i = 0; i < count; i++) {
+        if (ids.indexOf(list[i].id) < 0) {
+          ids.push(list[i].id);
+          changed = true;
+        }
+      }
+    });
+  });
+  if (changed) save();
+}
 function currentLesson() {
   const person = active();
   const list = lessonList(person.level);
   const cursor = lessonCursor(person.id, person.level);
-  return { lesson: list[cursor % list.length], cursor, total: list.length };
+  const next = list.find((lesson) => !lessonDone(person.id, lesson.id));
+  return {
+    lesson: next || list[cursor % list.length] || list[0],
+    cursor: cursor,
+    total: list.length,
+    allDone: list.length > 0 && !next
+  };
 }
 function lessonHomeCard() {
   const info = currentLesson();
@@ -538,12 +571,20 @@ function lessonHomeCard() {
   const done = !!daily.lesson;
   const title = lessonTitle(info.lesson);
   const en = uiLang() === "en";
-  return `<button class="lesson-card ${done ? "done" : ""}" data-act="start-lesson">
-    <div class="kicker">${done ? (en ? "Today's lesson is done" : "今天的一课完成了") : (en ? "Today's lesson · about 4 minutes" : "今日一课 · 大约 4 分钟")}</div>
+  const kicker = info.allDone
+    ? (en ? "This level is finished" : "这一级都学过了")
+    : done
+      ? (en ? "Today's lesson is done" : "今天的一课完成了")
+      : (en ? "Today's lesson · about 4 minutes" : "今日一课 · 大约 4 分钟");
+  const detail = info.allDone
+    ? (en ? "Checked lessons stay checked. You can open one again to review." : "打勾的课会留着。点开可以再练一遍。")
+    : done
+      ? (en ? "The next lesson is ready if you want to keep going." : "还可以接着学下一课。学过的课会打勾。")
+      : (en ? "Listen to three sentences, practice them, say them, then use them." : "先听三句，再练会，再说出来，最后用在对话里。");
+  return `<button class="lesson-card ${done || info.allDone ? "done" : ""}" data-act="start-lesson">
+    <div class="kicker">${kicker}</div>
     <b>${info.lesson.emoji} ${esc(title)}</b>
-    <span>${done
-      ? (en ? "The next lesson is ready if you want to keep going." : "还可以接着学下一课。学过的句子会按顺序往后排。")
-      : (en ? "Listen to three sentences, practice them, say them, then use them." : "先听三句，再练会，再说出来，最后用在对话里。")}</span>
+    <span>${detail}</span>
     <div class="mini-steps">${en ? "Learn · Practice · Speak · Use" : "学 · 练 · 说 · 用"}${reviewN ? (en ? " · review " + reviewN : " · 先复习 " + reviewN + " 句") : ""}</div>
   </button>`;
 }
@@ -568,9 +609,43 @@ function dropReview(pid, en) {
   if (!state.review[pid]) return;
   state.review[pid] = state.review[pid].filter((item) => item.en !== en);
 }
-function startLesson() {
+function lessonPath() {
+  const person = active();
+  if (!person) return "";
+  const list = lessonList(person.level);
+  if (!list.length) return "";
   const info = currentLesson();
-  const pid = active().id;
+  const en = uiLang() === "en";
+  const learnedN = list.filter((lesson) => lessonDone(person.id, lesson.id)).length;
+  const items = list.map((lesson, index) => {
+    const done = lessonDone(person.id, lesson.id);
+    const now = !done && info.lesson && lesson.id === info.lesson.id;
+    const phrases = lesson.phrases.map((phrase) => fill(phrase.en)).join(" · ");
+    const status = done ? (en ? "Learned" : "学过了") : now ? (en ? "Up next" : "现在学") : (en ? "Not yet" : "还没学");
+    return `<button class="path-item ${done ? "done" : now ? "now" : "later"}" data-act="start-lesson" data-id="${lesson.id}">
+      <span class="mark">${done ? "✓" : index + 1}</span>
+      <span><b>${lesson.emoji} ${esc(lessonTitle(lesson))}</b><small>${done ? esc(phrases) : status}</small></span>
+    </button>`;
+  }).join("");
+  return `<div class="row-title"><h2>${en ? "This level" : "这一级的课"}</h2><p>${learnedN}/${list.length}</p></div><div class="path-list">${items}</div>`;
+}
+function startLesson(lessonId) {
+  const person = active();
+  const list = lessonList(person.level);
+  let lesson = currentLesson().lesson;
+  if (lessonId) {
+    const found = list.find((item) => item.id === lessonId);
+    if (!found) return;
+    const openAt = list.findIndex((item) => !lessonDone(person.id, item.id));
+    const index = list.findIndex((item) => item.id === lessonId);
+    if (openAt !== -1 && index > openAt) {
+      toast(uiLang() === "en" ? "Finish the earlier lesson first." : "先把前面的课学完。");
+      return;
+    }
+    lesson = found;
+  }
+  if (!lesson) return;
+  const pid = person.id;
   const review = (state.review[pid] || []).slice(0, 2).map((item) => {
     const copy = JSON.parse(JSON.stringify(item));
     copy.options = shuffle(copy.options);
@@ -579,7 +654,7 @@ function startLesson() {
   ui.session = {
     type: "lesson",
     token: rid(),
-    lesson: cloneLesson(info.lesson),
+    lesson: cloneLesson(lesson),
     phase: review.length ? "review" : "learn",
     index: 0,
     review: review,
@@ -616,7 +691,11 @@ function finishLesson() {
   const pid = active().id;
   const level = active().level;
   if (!state.path[pid]) state.path[pid] = {};
-  state.path[pid][level] = (state.path[pid][level] || 0) + 1;
+  const ids = clearedIds(pid);
+  if (ids.indexOf(session.lesson.id) < 0) {
+    ids.push(session.lesson.id);
+    state.path[pid][level] = (state.path[pid][level] || 0) + 1;
+  }
   const stars = session.starsEarned + (session.clean ? 2 : 0);
   giveStars(pid, stars);
   session.lesson.phrases.forEach((phrase) => remember(pid, fill(phrase.en)));
@@ -725,7 +804,7 @@ const screens = {
       ${parrot("think")}
       <p class="kicker">${levelName(d.level)}</p>
       <h1 class="greet">${en ? "What should Pip call you?" : "怎么称呼你？"}</h1>
-      <p class="sub">${en ? "A first name is enough. Up to 8 characters." : "孩子可以用小名，家长也可以用“爸爸”“妈妈”。"}</p>
+      <p class="sub">${en ? "This name stays in this browser. Next time you open Pip, you continue as the same person." : "这个名字会留在这台浏览器里。下次打开还是同一个人，不用再填。"}</p>
       <input id="name-input" class="name-input" maxlength="8" placeholder="${en ? "For example: Mia" : "例如：豆豆"}" value="${esc(d.name)}" />
       <button class="primary full" data-act="save-profile">${en ? "Start" : "开始一起玩"}</button>
       <div style="height:8px"></div>
@@ -750,6 +829,7 @@ const screens = {
         </div>
       </section>
       ${lessonHomeCard()}
+      ${lessonPath()}
       ${!standalone ? `<p class="hint">${en ? "On a phone: open the browser menu and choose Add to Home Screen. Pip then opens like an app." : "手机浏览器菜单里选「添加到主屏幕」，就能像 App 一样打开。"}</p>` : ""}
       <div class="quote">
         <div class="quote-en">${esc(q.en)}</div>
@@ -1029,7 +1109,7 @@ const actions = {
     ui.step = "who";
     ui.screen = "home";
     ui.mood = "happy";
-    toast(uiLang() === "en" ? "Hi, " + name + ". Let's do a short lesson." : "你好，" + name + "。今天我们玩一小会儿。");
+    toast(uiLang() === "en" ? "Hi, " + name + ". This browser will remember you." : "你好，" + name + "。这台浏览器会记住你。");
     render();
   },
   nav(el) { navTo(el.dataset.to); },
@@ -1276,7 +1356,7 @@ const actions = {
     ui.mood = "think";
     render();
   },
-  "start-lesson"() { startLesson(); },
+  "start-lesson"(el) { startLesson(el && el.dataset ? el.dataset.id : ""); },
   "lesson-hear"() {
     const s = ui.session;
     let line = "";
@@ -1543,6 +1623,8 @@ function init() {
   if (saved) state = Object.assign(fresh(), saved);
   if (!state.path) state.path = {};
   if (!state.review) state.review = {};
+  if (!state.cleared) state.cleared = {};
+  backfillCleared();
   if (!state.profiles.some((p) => p.id === state.activeId)) {
     state.activeId = state.profiles[0] ? state.profiles[0].id : null;
   }
